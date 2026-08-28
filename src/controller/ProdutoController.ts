@@ -1,9 +1,8 @@
 import { Request, Response } from 'express';
 import { Produto } from '../model/Produto';
+import { Categoria } from '../model/Categoria';
 
 export class ProdutoController {
-  
-  // Listar todos os produtos
   static async listar(req: Request, res: Response): Promise<Response> {
     try {
       const produtos = await Produto.listarTodos();
@@ -14,12 +13,9 @@ export class ProdutoController {
     }
   }
 
-  // Buscar produto por código
   static async buscarPorCodigo(req: Request, res: Response): Promise<Response> {
     try {
       const { codigo } = req.params;
-      
-      // String(codigo) força o TypeScript a entender o parâmetro como string simples
       const produto = await Produto.buscarPorCodigo(String(codigo));
       
       if (!produto) {
@@ -33,7 +29,6 @@ export class ProdutoController {
     }
   }
 
-  // Listar produtos para reposição (Estoque baixo)
   static async listarReposicao(req: Request, res: Response): Promise<Response> {
     try {
       const produtos = await Produto.listarReposicao();
@@ -44,19 +39,46 @@ export class ProdutoController {
     }
   }
 
-  // Cadastrar produto
   static async cadastrar(req: Request, res: Response): Promise<Response> {
     try {
-      const dadosProduto = req.body;
-      
-      // Validação básica se os campos obrigatórios vieram preenchidos
-      if (!dadosProduto.codigo_produto || !dadosProduto.nome || !dadosProduto.preco_unitario) {
-        return res.status(400).json({ mensagem: 'Campos obrigatórios faltando.' });
+      const { codigo_produto, nome, categoria, preco_unitario, quantidade_disponivel, quantidade_minima, status } = req.body;
+
+      // 1. Validação de campos obrigatórios
+      if (!codigo_produto || !nome || !categoria || preco_unitario === undefined) {
+        return res.status(400).json({ mensagem: 'Código, nome, categoria e preço unitário são obrigatórios.' });
       }
 
-      const novoProduto = await Produto.cadastrar(dadosProduto);
+      // 2. Validação de formato/valores numéricos (regras de CHECK do banco)
+      if (typeof preco_unitario !== 'number' || preco_unitario < 0) {
+        return res.status(400).json({ mensagem: 'O preço unitário deve ser um número maior ou igual a zero.' });
+      }
 
-      // Retorna a mensagem de confirmação junto com o produto criado
+      if (quantidade_disponivel !== undefined && (typeof quantidade_disponivel !== 'number' || quantidade_disponivel < 0)) {
+        return res.status(400).json({ mensagem: 'A quantidade disponível não pode ser negativa.' });
+      }
+
+      if (quantidade_minima !== undefined && (typeof quantidade_minima !== 'number' || quantidade_minima < 0)) {
+        return res.status(400).json({ mensagem: 'A quantidade mínima não pode ser negativa.' });
+      }
+
+      if (status && !['ATIVO', 'DESATIVADO'].includes(status)) {
+        return res.status(400).json({ mensagem: 'Status deve ser ATIVO ou DESATIVADO.' });
+      }
+
+      // 3. Validação de chave estrangeira (FK da Categoria)
+      const categoriaExiste = await Categoria.buscarPorNome(categoria);
+      if (!categoriaExiste) {
+        return res.status(400).json({ mensagem: 'A categoria informada não existe no banco de dados.' });
+      }
+
+      // 4. Validação de duplicidade de PK
+      const produtoExiste = await Produto.buscarPorCodigo(codigo_produto);
+      if (produtoExiste) {
+        return res.status(409).json({ mensagem: 'Já existe um produto com este código.' });
+      }
+
+      const novoProduto = await Produto.cadastrar(req.body);
+
       return res.status(201).json({
         mensagem: 'Produto cadastrado com sucesso!',
         produto: novoProduto
